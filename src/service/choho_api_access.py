@@ -1,6 +1,5 @@
 import os
 import time
-import trimesh
 import requests
 import json
 import urllib
