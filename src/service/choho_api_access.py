@@ -32,7 +32,8 @@ def upload_file(file_name):
     resp.raise_for_status()
 
     upload_url = resp.text[1:-1] # Returns a single string JSON "string", can also use json.loads(resp.text)
-
+    print(f"Upload URL: {upload_url}")
+    
     resp = requests.put(upload_url, data) # No auth header is needed for uploading to the cloud storage service
 
     resp.raise_for_status()

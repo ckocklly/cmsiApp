@@ -102,6 +102,13 @@
         <div style="height: 10px;"></div>
 
         <button type="button" id="submit" onclick="processFiles()">Submit</button>
+
+        <div id="loadingPage">
+            <div class="spinner"></div>
+            <h2>Uploading Files...</h2>
+            <p>Please do not close this page.</p>
+        </div>
+
     </form>
 
     <script>
@@ -148,57 +155,28 @@
             };
 
             // Upload files
-            // const upperUrn = await uploadFile(creds, upperFile);
-            // const lowerUrn = await uploadFile(creds, lowerFile);
-            // const panUrn = await uploadFile(creds, panFile);
-            // const cephUrn = await uploadFile(creds, cephFile);
+            const upperUrn = await uploadFile(creds, upperFile);
 
-            // console.log("All files")
-
-            // Run analyses
-            const upperResult = await upperTeeth(creds, upperFile);
-            const lowerResult = await lowerTeeth(creds, lowerFile);
-
-            const arrangeResult =
-                await autoArrange(creds, upperResult, lowerResult);
-
-            const complexityResult =
-                await caseComplexity(
-                    creds,
-                    upperResult,
-                    lowerResult,
-                    arrangeResult
-                );
-
-            const cephResult =
-                await cephAnalysis(creds, cephFile);
-
-            const panoResult =
-                await panoAnalysis(creds, panFile);
-
-            // Download ZIP
-            await downloadZip({
-                upperResult,
-                lowerResult,
-                arrangeResult,
-                complexityResult,
-                cephResult,
-                panoResult
-            });
+            console.log(upperUrn);
         }
+
+        /////////////////////////////////////////////////////////////
+        // Configuration
+        /////////////////////////////////////////////////////////////
+
+        
 
         /////////////////////////////////////////////////////////////
         // Upload
         /////////////////////////////////////////////////////////////
 
         async function uploadFile(creds, file) {
-            if (!file) {
-                throw new Error("No file selected");
-            }
 
-            const ext = file.name.split(".").pop();
-            console.log(ext)
 
+            const ext = file.name.split('.').pop();
+            console.log("Uploading", file.name);
+            console.log("Type", ext);
+            console.log(creds)
             const response = await fetch(
                 `${creds.fileServerUrl}/scratch/${creds.userGroup}/${creds.userId}/upload_url?postfix=${ext}`,
                 {
@@ -211,25 +189,21 @@
             if (!response.ok)
                 throw new Error("Unable to obtain upload URL");
 
+            console.log("bibi");
+
             let uploadURL = await response.text();
 
             // remove quotes if API returns "string"
             uploadURL = uploadURL.replace(/^"|"$/g, "");
 
-            console.log("uploadUrl:", uploadURL);
-            console.log(uploadURL.includes("&amp;"));
-            console.log("file:", file);
-            console.log("file.type:", file.type);
-
-            const bytes = await file.arrayBuffer();
             const uploadResp = await fetch(uploadURL, {
                 method: "PUT",
-                body: bytes
+                body: file
             });
 
             if (!uploadResp.ok)
                 throw new Error("Upload failed");
-            
+
             const url = new URL(uploadURL);
 
             const path = url.pathname
@@ -245,39 +219,56 @@
         // Run workflow
         /////////////////////////////////////////////////////////////
 
-        async function runJobAndGetResults(creds, jsonCall, timeoutSec = 300) {
+        async function runJobAndGetResults(jsonCall, timeoutSec = 300) {
+
             const headers = {
                 "Content-Type": "application/json",
-                "X-ZH-TOKEN": creds.zhToken
+                "X-ZH-TOKEN": zhToken
             };
-            let response = await fetch(`${creds.baseUrl}/run`, {
+
+            let response = await fetch(`${baseUrl}/run`, {
                 method: "POST",
                 headers,
                 body: JSON.stringify(jsonCall)
             });
+
             if (!response.ok)
                 throw new Error("Cannot start workflow");
+
             const createResult = await response.json();
+
             const runId = createResult.run_id;
+
             console.log("Workflow:", runId);
+
             const start = Date.now();
+
             while (true) {
+
                 await new Promise(r => setTimeout(r, 300));
-                response = await fetch(`${creds.baseUrl}/run/${runId}`, {
+
+                response = await fetch(`${baseUrl}/run/${runId}`, {
                     headers
                 });
+
                 const result = await response.json();
+
                 if (result.completed)
                     break;
+
                 if (result.failed)
                     throw new Error(result.reason_public);
+
                 if ((Date.now() - start) / 1000 > timeoutSec)
                     throw new Error("Timeout");
             }
+
             console.log("Workflow completed.");
-            response = await fetch(`${creds.baseUrl}/data/${runId}`, {
+
+            response = await fetch(`${baseUrl}/data/${runId}`, {
                 headers
             });
+
             return await response.json();
         }
 
@@ -306,127 +297,199 @@
         // Analyses
         /////////////////////////////////////////////////////////////
 
-        async function upperTeeth(creds, file) {
-            const urn = await uploadFile(creds, file);
+        async function upperTeeth(file) {
+
+            const urn = await uploadFile(file);
+
             const jsonCall = {
+
                 spec_group: "mesh-processing",
                 spec_name: "oral-denoise-prod",
                 spec_version: "1.0-snapshot",
-                user_group: creds.userGroup,
-                user_id: creds.userId,
+
+                user_group: userGroup,
+                user_id: userId,
+
                 input_data: {
+
                     mesh: {
                         type: file.name.split('.').pop(),
                         data: urn
                     },
+
                     jaw_type: "Upper"
                 },
+
                 output_config: {
+
                     teeth_comp: {
                         type: "ply"
                     }
+
                 }
+
             };
-            return runJobAndGetResults(creds, jsonCall, 300);
+
+            return runJobAndGetResults(jsonCall, 300);
         }
 
-        async function lowerTeeth(creds, file) {
-            const urn = await uploadFile(creds, file);
+        /////////////////////////////////////////////////////////////
+
+        async function lowerTeeth(file) {
+
+            const urn = await uploadFile(file);
+
             const jsonCall = {
+
                 spec_group: "mesh-processing",
                 spec_name: "oral-denoise-prod",
                 spec_version: "1.0-snapshot",
-                user_group: creds.userGroup,
-                user_id: creds.userId,
+
+                user_group: userGroup,
+                user_id: userId,
+
                 input_data: {
+
                     mesh: {
                         type: file.name.split('.').pop(),
                         data: urn
                     },
+
                     jaw_type: "Lower"
                 },
+
                 output_config: {
+
                     teeth_comp: {
                         type: "ply"
                     }
+
                 }
+
             };
-            return runJobAndGetResults(creds, jsonCall, 300);
+
+            return runJobAndGetResults(jsonCall, 300);
         }
 
-        async function autoArrange(creds, upperResult, lowerResult) {
+        /////////////////////////////////////////////////////////////
+
+        async function autoArrange(upperResult, lowerResult) {
+
             const jsonCall = {
+
                 spec_group: "mesh-processing",
                 spec_name: "auto-arrange",
                 spec_version: "1.0-snapshot",
-                user_group: creds.userGroup,
-                user_id: creds.userId,
+
+                user_group: userGroup,
+                user_id: userId,
+
                 input_data: {
+
                     upper_teeth_dict: upperResult.teeth_comp,
                     upper_axis_matrix_dict: upperResult.axis,
+
                     lower_teeth_dict: lowerResult.teeth_comp,
                     lower_axis_matrix_dict: lowerResult.axis
+
                 }
+
             };
-            return runJobAndGetResults(creds, jsonCall, 500);
+
+            return runJobAndGetResults(jsonCall, 500);
         }
 
-        async function caseComplexity(creds, upper, lower, arrangement) {
+        /////////////////////////////////////////////////////////////
+
+        async function caseComplexity(upper, lower, arrangement) {
+
             const jsonCall = {
+
                 spec_group: "mesh-processing",
                 spec_name: "case-complexity-analysis",
                 spec_version: "1.0-snapshot",
-                user_group: creds.userGroup,
-                user_id: creds.userId,
+
+                user_group: userGroup,
+                user_id: userId,
+
                 input_data: {
+
                     teeth_dict: {
                         ...upper.teeth_comp,
                         ...lower.teeth_comp
                     },
+
                     axis_dict: {
                         ...upper.axis,
                         ...lower.axis
                     },
+
                     transformation_dict:
                         arrangement.result.transformation_dict,
+
                     landmarks_dict: {
                         ...upper.landmarks,
                         ...lower.landmarks
                     },
+
                     target_out_form: ""
                 }
+
             };
-            return runJobAndGetResults(creds, jsonCall, 500);
+
+            return runJobAndGetResults(jsonCall, 500);
         }
 
-        async function cephAnalysis(creds, file) {
-            const urn = await uploadFile(creds, file);
+        /////////////////////////////////////////////////////////////
+
+        async function ceph(file) {
+
+            const urn = await uploadFile(file);
+
             const jsonCall = {
+
                 spec_version: "1.0-snapshot",
                 spec_name: "ceph-analysis",
                 spec_group: "ceph",
-                user_group: creds.userGroup,
-                user_id: creds.userId,
+
+                user_group: userGroup,
+                user_id: userId,
+
                 input_data: {
+
                     image: urn
+
                 }
+
             };
-            return runJobAndGetResults(creds, jsonCall, 180);
+
+            return runJobAndGetResults(jsonCall, 180);
         }
 
-        async function panoAnalysis(creds, file) {
-            const urn = await uploadFile(creds, file);
+        /////////////////////////////////////////////////////////////
+
+        async function pano(file) {
+
+            const urn = await uploadFile(file);
+
             const jsonCall = {
+
                 spec_version: "1.0-snapshot",
                 spec_name: "pano-analysis",
                 spec_group: "pano",
-                user_group: creds.userGroup,
-                user_id: creds.userId,
+
+                user_group: userGroup,
+                user_id: userId,
+
                 input_data: {
+
                     image: urn
+
                 }
+
             };
-            return runJobAndGetResults(creds, jsonCall, 180);
+
+            return runJobAndGetResults(jsonCall, 180);
         }
 
         /////////////////////////////////////////////////////////////
