@@ -1,0 +1,520 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CMSI</title>
+
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 700px;
+            margin: 40px auto;
+            padding: 20px;
+        }
+
+        .form-group {
+            margin-bottom: 15px;
+        }
+
+        label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: bold;
+        }
+
+        input[type="text"],
+        input[type="password"] {
+            width: 100%;
+            padding: 8px;
+            box-sizing: border-box;
+        }
+
+        .upload-section {
+            margin-bottom: 15px;
+        }
+
+        button {
+            padding: 10px 20px;
+            cursor: pointer;
+        }
+
+        #loadingPage {
+            display: none;
+            text-align: center;
+            margin-top: 100px;
+        }
+
+        .spinner {
+            width: 50px;
+            height: 50px;
+            border: 5px solid #ddd;
+            border-top: 5px solid #0078d4;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin: auto;
+        }
+
+        @keyframes spin {
+            100% {
+                transform: rotate(360deg);
+            }
+        }
+    </style>
+</head>
+<body>
+
+    <h2>Upload Files</h2>
+
+    <form id="uploadForm">
+        <div class="form-group">
+            <label for="userId">User ID</label>
+            <input type="text" id="userId" name="userId" required>
+        </div>
+
+        <div class="form-group">
+            <label for="token">Token</label>
+            <input type="text" id="token" name="token" required>
+        </div>
+
+        <div style="height: 5px;"></div>
+
+        <div class="upload-section">
+            <label>Upload upper jaw 3D scan</label>
+            <input type="file" id="upper" name="upper">
+        </div>
+
+        <div class="upload-section">
+            <label>Upload lower jaw 3D scan</label>
+            <input type="file" id="lower" name="lower">
+        </div>
+
+        <div class="upload-section">
+            <label>Upload frontal ceph x-ray</label>
+            <input type="file" id="pan" name="pan">
+        </div>
+
+        <div class="upload-section">
+            <label>Upload lateral ceph x-ray</label>
+            <input type="file" id="ceph" name="ceph">
+        </div>
+
+        <div style="height: 10px;"></div>
+
+        <button type="button" id="submit" onclick="processFiles()">Submit</button>
+
+        <div id="loadingPage">
+            <div class="spinner"></div>
+            <h2>Uploading Files...</h2>
+            <p>Please do not close this page.</p>
+        </div>
+
+    </form>
+
+    <script>
+        async function processFiles() {
+
+            const userId = document.getElementById("userId").value;
+            const token = document.getElementById("token").value;
+
+            const upperFile = document.getElementById("upper").files[0];
+            const lowerFile = document.getElementById("lower").files[0];
+            const panFile = document.getElementById("pan").files[0];
+            const cephFile = document.getElementById("ceph").files[0];
+
+            // Upload files
+            const upperUrn = await uploadFile(upperFile);
+            const lowerUrn = await uploadFile(lowerFile);
+            const panUrn = await uploadFile(panFile);
+            const cephUrn = await uploadFile(cephFile);
+
+            // Run analyses
+            const upperResult = await upperTeeth(upperFile);
+            const lowerResult = await lowerTeeth(lowerFile);
+
+            const arrangeResult =
+                await autoArrange(upperResult, lowerResult);
+
+            const complexityResult =
+                await caseComplexity(
+                    upperResult,
+                    lowerResult,
+                    arrangeResult
+                );
+
+            const cephResult =
+                await cephAnalysis(cephFile);
+
+            const panoResult =
+                await panoAnalysis(panFile);
+
+            // Download ZIP
+            await downloadZip({
+                upperResult,
+                lowerResult,
+                arrangeResult,
+                complexityResult,
+                cephResult,
+                panoResult
+            });
+        }
+
+        /////////////////////////////////////////////////////////////
+        // Configuration
+        /////////////////////////////////////////////////////////////
+
+        const baseUrl = "https://api.sg.chohotech.com/zhmle-workflow-api/workflow";
+        const fileServerUrl = "https://api.sg.chohotech.com/file-server";
+        const zhToken = document.getElementById("token").value;
+        const userGroup = "APIClient";
+        const userId = document.getElementById("userId").value;
+
+        /////////////////////////////////////////////////////////////
+        // Upload
+        /////////////////////////////////////////////////////////////
+
+        async function uploadFile(file) {
+            const ext = file.name.split('.').pop();
+            console.log("Uploading", file.name);
+            const response = await fetch(
+                `${fileServerUrl}/scratch/${userGroup}/${userId}/upload_url?postfix=${ext}`,
+                {
+                    headers: {
+                        "X-ZH-TOKEN": zhToken
+                    }
+                }
+            );
+
+            if (!response.ok)
+                throw new Error("Unable to obtain upload URL");
+
+            let uploadURL = await response.text();
+
+            // remove quotes if API returns "string"
+            uploadURL = uploadURL.replace(/^"|"$/g, "");
+
+            const uploadResp = await fetch(uploadURL, {
+                method: "PUT",
+                body: file
+            });
+
+            if (!uploadResp.ok)
+                throw new Error("Upload failed");
+
+            const url = new URL(uploadURL);
+
+            const path = url.pathname
+                .replace(/^\/+/, "")
+                .split("/")
+                .slice(3)
+                .join("/");
+
+            return `urn:zhfile:o:s:${userGroup}:${userId}:${path}`;
+        }
+
+        /////////////////////////////////////////////////////////////
+        // Run workflow
+        /////////////////////////////////////////////////////////////
+
+        async function runJobAndGetResults(jsonCall, timeoutSec = 300) {
+
+            const headers = {
+                "Content-Type": "application/json",
+                "X-ZH-TOKEN": zhToken
+            };
+
+            let response = await fetch(`${baseUrl}/run`, {
+                method: "POST",
+                headers,
+                body: JSON.stringify(jsonCall)
+            });
+
+            if (!response.ok)
+                throw new Error("Cannot start workflow");
+
+            const createResult = await response.json();
+
+            const runId = createResult.run_id;
+
+            console.log("Workflow:", runId);
+
+            const start = Date.now();
+
+            while (true) {
+
+                await new Promise(r => setTimeout(r, 300));
+
+                response = await fetch(`${baseUrl}/run/${runId}`, {
+                    headers
+                });
+
+                const result = await response.json();
+
+                if (result.completed)
+                    break;
+
+                if (result.failed)
+                    throw new Error(result.reason_public);
+
+                if ((Date.now() - start) / 1000 > timeoutSec)
+                    throw new Error("Timeout");
+            }
+
+            console.log("Workflow completed.");
+
+            response = await fetch(`${baseUrl}/data/${runId}`, {
+                headers
+            });
+
+            return await response.json();
+        }
+
+        /////////////////////////////////////////////////////////////
+        // Download file
+        /////////////////////////////////////////////////////////////
+
+        async function retrieveData(urn) {
+
+            const response = await fetch(
+                `${fileServerUrl}/file/download?urn=${encodeURIComponent(urn)}`,
+                {
+                    headers: {
+                        "X-ZH-TOKEN": zhToken
+                    }
+                }
+            );
+
+            if (!response.ok)
+                throw new Error("Download failed");
+
+            return await response.arrayBuffer();
+        }
+
+        /////////////////////////////////////////////////////////////
+        // Analyses
+        /////////////////////////////////////////////////////////////
+
+        async function upperTeeth(file) {
+
+            const urn = await uploadFile(file);
+
+            const jsonCall = {
+
+                spec_group: "mesh-processing",
+                spec_name: "oral-denoise-prod",
+                spec_version: "1.0-snapshot",
+
+                user_group: userGroup,
+                user_id: userId,
+
+                input_data: {
+
+                    mesh: {
+                        type: file.name.split('.').pop(),
+                        data: urn
+                    },
+
+                    jaw_type: "Upper"
+                },
+
+                output_config: {
+
+                    teeth_comp: {
+                        type: "ply"
+                    }
+
+                }
+
+            };
+
+            return runJobAndGetResults(jsonCall, 300);
+        }
+
+        /////////////////////////////////////////////////////////////
+
+        async function lowerTeeth(file) {
+
+            const urn = await uploadFile(file);
+
+            const jsonCall = {
+
+                spec_group: "mesh-processing",
+                spec_name: "oral-denoise-prod",
+                spec_version: "1.0-snapshot",
+
+                user_group: userGroup,
+                user_id: userId,
+
+                input_data: {
+
+                    mesh: {
+                        type: file.name.split('.').pop(),
+                        data: urn
+                    },
+
+                    jaw_type: "Lower"
+                },
+
+                output_config: {
+
+                    teeth_comp: {
+                        type: "ply"
+                    }
+
+                }
+
+            };
+
+            return runJobAndGetResults(jsonCall, 300);
+        }
+
+        /////////////////////////////////////////////////////////////
+
+        async function autoArrange(upperResult, lowerResult) {
+
+            const jsonCall = {
+
+                spec_group: "mesh-processing",
+                spec_name: "auto-arrange",
+                spec_version: "1.0-snapshot",
+
+                user_group: userGroup,
+                user_id: userId,
+
+                input_data: {
+
+                    upper_teeth_dict: upperResult.teeth_comp,
+                    upper_axis_matrix_dict: upperResult.axis,
+
+                    lower_teeth_dict: lowerResult.teeth_comp,
+                    lower_axis_matrix_dict: lowerResult.axis
+
+                }
+
+            };
+
+            return runJobAndGetResults(jsonCall, 500);
+        }
+
+        /////////////////////////////////////////////////////////////
+
+        async function caseComplexity(upper, lower, arrangement) {
+
+            const jsonCall = {
+
+                spec_group: "mesh-processing",
+                spec_name: "case-complexity-analysis",
+                spec_version: "1.0-snapshot",
+
+                user_group: userGroup,
+                user_id: userId,
+
+                input_data: {
+
+                    teeth_dict: {
+                        ...upper.teeth_comp,
+                        ...lower.teeth_comp
+                    },
+
+                    axis_dict: {
+                        ...upper.axis,
+                        ...lower.axis
+                    },
+
+                    transformation_dict:
+                        arrangement.result.transformation_dict,
+
+                    landmarks_dict: {
+                        ...upper.landmarks,
+                        ...lower.landmarks
+                    },
+
+                    target_out_form: ""
+                }
+
+            };
+
+            return runJobAndGetResults(jsonCall, 500);
+        }
+
+        /////////////////////////////////////////////////////////////
+
+        async function ceph(file) {
+
+            const urn = await uploadFile(file);
+
+            const jsonCall = {
+
+                spec_version: "1.0-snapshot",
+                spec_name: "ceph-analysis",
+                spec_group: "ceph",
+
+                user_group: userGroup,
+                user_id: userId,
+
+                input_data: {
+
+                    image: urn
+
+                }
+
+            };
+
+            return runJobAndGetResults(jsonCall, 180);
+        }
+
+        /////////////////////////////////////////////////////////////
+
+        async function pano(file) {
+
+            const urn = await uploadFile(file);
+
+            const jsonCall = {
+
+                spec_version: "1.0-snapshot",
+                spec_name: "pano-analysis",
+                spec_group: "pano",
+
+                user_group: userGroup,
+                user_id: userId,
+
+                input_data: {
+
+                    image: urn
+
+                }
+
+            };
+
+            return runJobAndGetResults(jsonCall, 180);
+        }
+
+        /////////////////////////////////////////////////////////////
+        // Example
+        /////////////////////////////////////////////////////////////
+
+        async function testUpload() {
+
+            const file = document.getElementById("fileInput").files[0];
+
+            if (!file) {
+                alert("Select a file first.");
+                return;
+            }
+
+            try {
+
+                const result = await upperTeeth(file);
+
+                console.log(result);
+
+            } catch (e) {
+
+                console.error(e);
+
+            }
+        }
+    </script>
+
+</body>
+</html>

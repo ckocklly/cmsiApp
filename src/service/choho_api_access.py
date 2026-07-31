@@ -82,15 +82,6 @@ def retrieve_data(urn):
         headers={"X-ZH-TOKEN": zh_token}
     ).content
 
-def retrieve_mesh(mesh_file_json):
-    resp = requests.get(
-        file_server_url + f"/file/download?" + \
-            urllib.parse.urlencode({"urn": mesh_file_json['data']}),
-        headers={"X-ZH-TOKEN": zh_token}
-    )
-    return trimesh.load(trimesh.util.wrap_as_stream(resp.content), file_type=mesh_file_json['type'])
-
-
 # ======== Analyses ========
 def upper_teeth(filepath):
     json_call = {

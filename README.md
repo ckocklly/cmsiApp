@@ -28,13 +28,13 @@ Thanks to CMake, we can build the project by just two commands
 cmake -B build
 cmake --build build
 ```
-The executable `cmsiApp.exe` or `cmsiApp.app` should be generated in the folder `build`. Simply open it.
+The executable `cmsiApp.exe` (Windows) or `cmsiApp.app` (Mac) should be generated in the folder `build`. Simply open it.
 
 ### Step 3: Upload the images & wait for results
 *(unfinished)*
 
-## Acknowledgements
+## Acknowledgments
  - Matthew Chew from R&D Hardware, LuxCreo for mentorship
  - Chohotech for analyses
  - Basil Chen for decision framework
- - Dr. Jean-Marc Retrouvey for CMSI
+ - Jean-Marc Retrouvey PhD for CMSI

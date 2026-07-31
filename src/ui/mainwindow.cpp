@@ -11,32 +11,30 @@ MainWindow::MainWindow(QWidget *parent)
 {
     ui->setupUi(this);
     resize(800, 600);
-    ui->mainLayout->setAlignment(Qt::AlignTop);
-    for (auto lcd : findChildren<QLCDNumber*>())
-        lcd->display("---");
+    ui->uploadPageVLayout->setAlignment(Qt::AlignTop);
+    ui->mainStackedWidget->setFrameShape(QFrame::NoFrame);
 
-        
-    ui->p4Verdict->setCurrentIndex(0);
-    ui->p1Pages->setCurrentIndex(0);
-    connect(ui->p1Combo,
-        QOverload<int>::of(&QComboBox::currentIndexChanged),
-        ui->p1Pages,
-        &QStackedWidget::setCurrentIndex
-    );
-
-    connect(ui->calcButton, &QPushButton::clicked,
-        this, &MainWindow::onCalculateClicked);
-    
-    for (auto spin : findChildren<QAbstractSpinBox*>())
-        spin->installEventFilter(this);
-
-    for (auto combo : findChildren<QComboBox*>())
-        combo->installEventFilter(this);
-
-}   
+    QDir().mkpath(uploadDir);
+}
 
 MainWindow::~MainWindow() {
     delete ui;
+}
+
+void MainWindow::uploadFile(int category) {
+    QString fileName = QFileDialog::getOpenFileName(
+        this,
+        "Select file",
+        "",
+        "All Files (*)"
+    );
+
+    QFileInfo info(fileName);
+    QString ext = info.suffix().toLower();
+    
+    m_filePaths[category] = uploadDir + "/" + outputNames[category] + "." + ext;
+
+    QFile::copy(fileName, m_filePaths[category]);
 }
 
 bool MainWindow::eventFilter(QObject *obj, QEvent *event)
@@ -51,6 +49,7 @@ bool MainWindow::eventFilter(QObject *obj, QEvent *event)
     return QMainWindow::eventFilter(obj, event);
 }
 
+/*
 void MainWindow::onCalculateClicked() {
     if (ui->caseIdEdit->text().isEmpty()) {
         QMessageBox::warning(
@@ -372,3 +371,4 @@ void MainWindow::calculate() {
     else
         ui->verdictAlertCtnt->setText(alertStr);
 }
+*/
